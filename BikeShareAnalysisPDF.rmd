@@ -1,0 +1,358 @@
+---
+title: "BikeShare Analysis"
+author: "Casey Rodriguez"
+date: '2022-09-26'
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+setwd("../BikeSharing/")
+
+rm(list = ls())
+df = read.csv2("bikeSharing.csv",sep=",")
+
+library(tidyverse)
+library(lubridate)
+```
+
+## Introduction
+
+For the purpose of this presentation we are interested in the factors that contribute
+to the frequency in which bicycles are rented from a bike share program. The data
+we will be using is sourced from Kaggle, though few notes are given on the origin of
+said data. The full source is available at <a href="https://www.kaggle.com/datasets/shrutipandit707/bikesharing">
+https://www.kaggle.com/datasets/shrutipandit707/bikesharing</a>.
+
+We are interested in determining factors that can predict the total daily ridership
+of a specific day, given the weather conditions and what day we are preparing for.
+
+The information provided in the dataset is difficult to parse at first glance and
+we will need to work on cleaning the data before we can begin analysis. A quick
+preview also reveals that many of the variables are unclear, often leaving discrete
+entries as numerical when explanatory text would be helpful. One seemingly incorrect
+detail is the `workingday` variable, later renamed to `is_workday`, which tracks
+whether or not a given day is a working day. Our assumption was that this indicates
+weekend days, but that is not the case, given the inconsistency the variable has
+when compared to the day of the week a specific date would be.
+
+```{r intro, echo=FALSE}
+df %>%
+    head()
+```
+
+## Data Cleaning
+
+Several modifications to the data frame would benefit readability and improve
+foundation work later. Important changes include renaming the columns, unifying
+the date formatting, replacing the numbers in discrete variables, and truncating
+the digits for temperature, humidity, and wind speed.
+
+```{r cleaning}
+# Rename each column
+df <- df %>%
+    rename(id           = instant,
+           date         = dteday,
+           season       = season,
+           year         = yr,
+           month        = mnth,
+           is_holiday   = holiday,
+           day_of_week  = weekday,
+           is_workday   = workingday,
+           weather      = weathersit,
+           temperature  = temp,
+           ambient_temp = atemp,
+           humidity     = hum,
+           wind_speed   = windspeed,
+           casual_rides = casual,
+           return_rides = registered,
+           total_rides  = cnt) %>%
+    # Modify column data
+    mutate(# Unify date format
+           date = lubridate::parse_date_time(date, orders = c('dmy')),
+           # Convert discrete numbers to strings
+           month        = month.name[month],
+           year         = case_when(year == 0 ~ "2018",
+                                    year == 1 ~ "2019"),
+           season       = case_when(season == 1 ~ "Spring",
+                                    season == 2 ~ "Summer",
+                                    season == 3 ~ "Autumn",
+                                    season == 4 ~ "Winter"),
+           weather      = case_when(weather == 1 ~ "Clear",
+                                    weather == 2 ~ "Overcast",
+                                    weather == 3 ~ "Storm"),
+           day_of_week  = wday(date, week_start=2,label=TRUE),
+           is_holiday   = as.logical(is_holiday),
+           is_workday   = as.logical(is_workday),
+           # Vars temperature, ambient_temp, humidity, and wind_speed are characters
+           # Convert them to doubles for use as continuous variables
+           temperature  = as.double(temperature),
+           ambient_temp = as.double(ambient_temp),
+           humidity     = as.double(humidity),
+           wind_speed   = as.double(wind_speed),
+           # Convert relevant columns to factors
+           year         = fct_relevel(year, "2018", "2019"),
+           month        = fct_relevel(month, "January", "February", "March",
+                                             "April", "May", "June", "July",
+                                             "August", "September", "October",
+                                             "November", "December"),
+           season       = fct_relevel(season, "Winter", "Spring", "Summer", "Autumn"),
+           weather      = fct_relevel(weather, "Clear", "Overcast", "Storm"),
+           day_of_week  = fct_relevel(day_of_week, "Mon", "Tue", "Wed", "Thu",
+                                                   "Fri", "Sat", "Sun"))
+
+# Finally, preview the new data
+head(df)
+```
+
+## Column Description
+
+```{r description, echo=FALSE}
+Variables = names(df)
+Description = c("A unique daily identifier",
+            "The date data was collected",
+            "The current season",
+            "The current year",
+            "The current month",
+            "If the day was a holiday",
+            "The day of the week",
+            "If the day was a workday",
+            "The weather conditions of a given day",
+            "Reported daily temperature throughout the day",
+            "The ambient temperature throughout the day",
+            "The humidity throughout the day",
+            "The wind speed throughout the day",
+            "How many non-registered users rented a bike",
+            "How many registered users rented a bike",
+            "Count of times a bike was rented on a given day")
+varframe = data.frame(Variables, Description)
+knitr::kable(varframe)
+```
+
+## Data Exploration
+
+Some quick plots of ride counts across several variables can give us a quick glance
+at which variables are worth investigating as good predictors of `total_rides`.
+
+### Categorical Data
+
+```{r EDAp1}
+df %>%
+    ggplot(aes(x = season, y = total_rides, fill = season)) +
+    geom_violin() +
+    geom_boxplot(width=0.2, color="black", fill="white") +
+    labs(x = "Season",
+         y = "Daily Riders",
+         title = "Distribution of Daily Ridership Between Seasons") +
+    theme_bw() +
+    theme(legend.position = "none")
+
+df %>%
+    ggplot(aes(x = weather, y = total_rides, fill = weather)) +
+    geom_violin() +
+    geom_boxplot(width=0.2, color="black", fill="white") +
+    labs(x = "Weather",
+         y = "Daily Riders",
+         title = "Distribution of Daily Ridership By Daily Weather") +
+    theme_bw() +
+    theme(legend.position = "none")
+
+df %>%
+    ggplot(aes(x = day_of_week, y = total_rides, fill = day_of_week)) +
+    geom_violin() +
+    geom_boxplot(width=0.2, color="black", fill="white") +
+    labs(x = "Day of the Week",
+         y = "Daily Riders",
+         title = "Distribution of Daily Ridership By Day of Week") +
+    theme_bw() +
+    theme(legend.position = "none")
+
+df %>%
+    ggplot(aes(x = month, y = total_rides, fill = month)) +
+    geom_violin() +
+    geom_boxplot(width=0.2, color="black", fill="white") +
+    labs(x = "Month",
+         y = "Daily Riders",
+         title = "Distribution of Daily Ridership By Month") +
+    theme_bw() +
+    theme(legend.position = "none", axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+ds <- df %>%
+    select(season, month, is_holiday, day_of_week, is_workday, weather)
+sapply(ds, function(x) table(x)/nrow(ds)*100)
+```
+
+Categorical variables out of the way, the vast majority (97%) of our data points
+take place on non-holiday days, making it unlikely to be a good predictor for future
+total ride counts. However, we still need to explore our numerical variables.
+
+### Continuous Data
+
+```{r EDAp2}
+
+df %>%
+    ggplot(aes(x = temperature, y = total_rides)) +
+    geom_point() + 
+    geom_smooth(method = "lm", se = TRUE, color = "red") +
+    labs(x = "Actual Temperature (°C)",
+         y = "Daily Riders",
+         title = "Daily Ridership With Respect to Temperature") +
+    theme_bw()
+
+df %>%
+    ggplot(aes(x = ambient_temp, y = total_rides)) +
+    geom_point() + 
+    geom_smooth(method = "lm", se = TRUE, color = "red") +
+    labs(x = "Ambient Temperature (°C)",
+         y = "Daily Riders",
+         title = "Daily Ridership With Respect to Ambient Temperature") +
+    theme_bw()
+
+df %>%
+    ggplot(aes(x = humidity, y = total_rides)) +
+    geom_point() + 
+    geom_smooth(method = "lm", se = TRUE, color = "red") +
+    labs(x = "%Humidity",
+         y = "Daily Riders",
+         title = "Daily Ridership With Respect to Humidity") +
+    theme_bw()
+
+df %>%
+    ggplot(aes(x = wind_speed, y = total_rides)) +
+    geom_point() + 
+    geom_smooth(method = "lm", se = TRUE, color = "red") +
+    labs(x = "Wind Speed (km/h)",
+         y = "Daily Riders",
+         title = "Daily Ridership With Respect to Wind Speeds") +
+    theme_bw()
+```
+
+From our plotting of the daily rider total against our numerical data, we see
+correlation between both actual and ambient temperatures and total daily rides.
+By combining our findings from our categorical and continuous exploration, we
+can start to look at building our first model.
+
+## Making a Model
+
+Making a model is easy. Making a good model takes time. Sometimes the simplest of
+models is enough to make a sufficient prediction, taking a single variable and gauging
+how well it can predict a second variable. Let's see how simple models fare at
+calculating daily ride totals.
+
+```{r modelsp1}
+season_rides = lm(total_rides ~ season, data=df)
+summary(season_rides)
+
+rain_rides = lm(total_rides ~ weather, data=df)
+summary(rain_rides)
+
+month_rides = lm(total_rides ~ month, data = df)
+summary(month_rides)
+```
+
+While the single, categorical models look promising, running a sanity check by
+looking for a random distribution of residuals tells a different story.
+
+```{r modelsp2}
+plot(season_rides$residuals, ylab = "Ride Count ~ Season Model Residuals",
+     main="Ride Count ~ Season Residual Distribution")
+plot(rain_rides$residuals, ylab = "Ride Count ~ Weather Model Residuals",
+     main="Ride Count ~ Weather Residual Distribution")
+plot(month_rides$residuals, ylab = "Ride Count ~ Month Model Residual",
+     main="Ride Count ~ Month Residual Distribution")
+```
+
+The plots of each model's residuals have clear patterns, indicating that a more
+complex model is warranted. Given the jump in the middle of the chart, `year`
+might be more relevant than initially thought. Additionally, each variable
+tested above might have unexplored correlation. 
+
+Before moving on to multivariate linear regression, modeling how our continuous
+variables match to daily rides can give more indication on what factors correlate.
+
+```{r modelsp3}
+temp_rides = lm(total_rides ~ temperature, data = df)
+summary(temp_rides)
+
+ambient_rides = lm(total_rides ~ ambient_temp, data = df)
+summary(ambient_rides)
+
+plot(temp_rides$residuals, ylab = "Ride Count ~ Temperature Model Residual",
+     main="Ride Count ~ Temperature Residual Distribution")
+plot(ambient_rides$residuals, ylab = "Ride Count ~ Ambient Temperature Model Residual",
+     main="Ride Count ~ Ambient Temperature Residual Distribution")
+```
+
+## Making Better Models
+
+Where single-variable regression fails, multiple-variable regression saves the day.
+By introducing a more complex model, we both decrease the intuitiveness and increase
+the accuracy the model provides.
+
+Our first attempt at a multivariate model uses ambient temperatures, the year,
+and the weather to predict a day's total ride count.
+
+```{r modelsp4}
+multi_rides = lm(total_rides ~ temperature + year + weather, data = df)
+summary(multi_rides)
+
+plot(multi_rides$residuals, ylab = "Ride Count ~ Temperature + Year + Weather Residuals",
+     main = "Ride Count ~ Temperature + Year + Weather Residual Distribution")
+```
+
+While the first attempt did produce a more accurate chart, nearly doubling the 
+R-squared values of the previous, single-variable models, it still could be better.
+In particular, the residual chart seems to indicate a regular, repeating pattern.
+Including seasonality in our model improves the design once more.
+
+## The Final Model
+
+```{r modelsp5}
+
+all_rides = lm(total_rides ~ temperature + year + season + weather, data = df)
+summary(all_rides)
+plot(all_rides$residuals, ylab = "Ride Count ~ Temp + Year + Season + Weather Residuals",
+     main = "Ride Count ~ Temp + Year + Season + Weather Residual Distribution")
+```
+
+With a residual distribution that lacks a clear pattern, a p-value that is well
+below the standard 0.05 required for a 95% null-hypothesis rejection certainty,
+and an R-squared value at approximately 0.8, the new model incorporating the area's
+temperature and weather alongside the record's year and astronomical season provides
+a worthwhile prediction for the day's total ride count.
+
+## Final Model Findings
+
+Based on the final model, our top three predictor variables are:
+```{r finaldesc, echo=FALSE}
+Variable = c("Temperature", "Year", "(Stormy) Weather")
+Description = c("A coefficient value of 121.391 indicates that a unit increase in temperature increases the day's ride count by 121.391 rides.",
+                "A coefficient value of 2052.907 indicates that, with respect to 2018, the same day in the year 2019 will see an increase in the day's ride count by 2052.907 rides.",
+                "A coefficient value of -2408.860 indicates that, with respect to a sunny day, stormy weather will see 2408.860 less daily riders.")
+varframe = data.frame(Variable, Description)
+knitr::kable(varframe)
+```
+
+Put in common tongue, a bike rental company can expect more customers the longer
+they are in business and the warmer the day is. However, they can expect a noticeable
+drop in customers should the weather forecast predict rain.
+
+Our remaining variables are also worth considering, winter brings in the most members,
+with respect to spring, summer, and autumn days. Finally, sunny weather sees the most
+foot traffic, with respect to both overcast and stormy weather days. For planning
+purposes, the rental company should expect high demands on sunny, warm, winter days,
+especially if the company has been operating in the area for over a year. On colder,
+cloudy, spring days newer bike rentals can expect lower ridership numbers.
+
+## Further Analysis
+
+With our model complete, we can predict total ridership for a given date should
+we know the expected weather conditions in advance. However, there are more details
+we can explore, leaving questions for further analysis down the line. In future
+study we would like to investigate how weather conditions affect ridership between
+members and casual users.
+
+
+
+
